@@ -17,7 +17,8 @@ from .const import (
     AI_MODE_AUTO, AI_MODE_FORCE_BOOST, AI_MODE_FORCE_NORMAL, AI_MODE_FORCE_BLOCK,
     CONF_MQTT_TOPIC, CONF_MQTT_AI_TOPIC,
     CONF_NORDPOOL_CONFIG_ENTRY, CONF_NORDPOOL_AREA,
-    CONF_TEMP_ENTITY, CONF_BOOST_PCT, CONF_BLOCK_PCT, CONF_MIN_TEMP,
+    CONF_TEMP_ENTITY, CONF_TARIFF_ENTITY,
+    CONF_BOOST_PCT, CONF_BLOCK_PCT, CONF_MIN_TEMP,
     DEFAULT_BOOST_PCT, DEFAULT_BLOCK_PCT, DEFAULT_MIN_TEMP,
     DEFAULT_MQTT_TOPIC, DEFAULT_MQTT_AI_TOPIC,
     MIN_SPREAD_TO_ACT, PRICE_ROUND_TO, EXTREME_LOW, EXTREME_HIGH,
@@ -327,6 +328,17 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             confidence = 95
             temp_override_active = True
 
+        # POST-3: Tariff blockerar boost globalt (sista steget, efter alla overrides)
+        tariff_blocked = False
+        if sg_mode == MODE_BOOST and not ai_override_active:
+            tariff_entity = self.entry.data.get(CONF_TARIFF_ENTITY)
+            if tariff_entity:
+                t_state = self.hass.states.get(tariff_entity)
+                if t_state and t_state.state in ("on", "true", "1", "active"):
+                    sg_mode = MODE_NORMAL
+                    reason = "⏰ Tariff aktiv — boost blockerad"
+                    tariff_blocked = True
+
         # Sänk confidence om imorgondagens priser saknas sent
         if not has_tomorrow and current_hour >= 18:
             confidence = max(50, confidence - 10)
@@ -357,7 +369,10 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             "indoor_temp": indoor_temp,
             "temp_override_active": temp_override_active,
             "prod_override_active": prod_override_active,
-            "prod_override_state": self._prod_state.get("mode"),
+            "prod_override_mode": self._prod_state.get("mode"),
+            "prod_override_in_hysteresis": self._prod_state.get("in_hysteresis", False),
+            "prod_override_countdown": self._get_prod_countdown(),
+            "tariff_blocked": tariff_blocked,
             "ai_override_active": ai_override_active,
             "ai_mode": effective_ai_mode,
             "ai_reason": self._ai_reason,
@@ -502,6 +517,25 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             s["mode"] = None
 
         return original_mode, original_reason, False
+
+    def _get_prod_countdown(self) -> dict:
+        """Returnerar nedräkningsstatus för production override (som Node-RED status-text)."""
+        s = self._prod_state
+        now = datetime.now()
+        from .const import CONF_PROD_MIN_DURATION, CONF_PROD_OFF_DELAY, DEFAULT_PROD_MIN_DURATION, DEFAULT_PROD_OFF_DELAY
+        min_duration = self.entry.data.get(CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
+        off_delay = self.entry.data.get(CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
+
+        if s["active"] and s["in_hysteresis"] and s["last_change"]:
+            time_left = off_delay - (now - s["last_change"]).total_seconds()
+            return {"state": "hysteresis", "seconds_left": max(0, round(time_left))}
+        elif not s["active"] and s["start_time"]:
+            duration = (now - s["start_time"]).total_seconds()
+            time_left = min_duration - duration
+            return {"state": "waiting", "seconds_left": max(0, round(time_left))}
+        elif s["active"]:
+            return {"state": "active", "seconds_left": 0}
+        return {"state": "passive", "seconds_left": 0}
 
     def _get_indoor_temp(self) -> float | None:
         temp_entity = self.entry.data.get(CONF_TEMP_ENTITY)
