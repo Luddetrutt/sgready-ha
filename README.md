@@ -123,6 +123,16 @@ block  → Kontakt 1 = ON,  Kontakt 2 = OFF
 
 ---
 
+## Lovelace-dashboard
+
+Färdigt kort finns i [`lovelace-card.yaml`](lovelace-card.yaml).
+
+Lägg till det via **Dashboard → Redigera → Lägg till kort → Manuell** och klistra in innehållet.
+
+> **Tips:** Kontrollera entity-ID:na under Inställningar → Enheter & Tjänster → SG Ready → Entiteter om något kort inte visas. Svenska tecken (ä/ö/å) kan påverka det automatgenererade ID:t.
+
+---
+
 ## Utvecklat av
 
 JL STYR AB — [jlstyr.se](https://jlstyr.se)

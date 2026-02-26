@@ -1,0 +1,79 @@
+# SG Ready Styrning — Lovelace-kort
+# Klistra in via Dashboard → Redigera → Lägg till kort → Manuell
+#
+# OBS: Om ett kort inte dyker upp, kolla entity-ID:na under:
+# Inställningar → Enheter & Tjänster → SG Ready → Entiteter
+# Svenska tecken (ä/ö/å) kan ge något annorlunda ID i din HA-installation.
+
+type: vertical-stack
+cards:
+
+  # ── Statusrad ──────────────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.sg_ready_lage
+        name: Läge
+        icon: mdi:heat-pump
+        state_color: true
+      - type: entity
+        entity: sensor.sg_ready_aktuellt_pris
+        name: Pris nu
+        icon: mdi:currency-usd
+      - type: entity
+        entity: sensor.sg_ready_prisrankning
+        name: Rankning
+        icon: mdi:sort-numeric-ascending
+
+  # ── Manuella overrides ────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: tile
+        entity: switch.sg_ready_boost_override
+        name: Manuell Boost
+        icon: mdi:lightning-bolt
+        color: orange
+      - type: tile
+        entity: select.sg_ready_ai_override
+        name: AI Override
+        icon: mdi:robot
+
+  # ── Prisalgoritm-sliders ───────────────────────────────────────────────────
+  - type: entities
+    title: Prisalgoritm
+    icon: mdi:chart-bell-curve
+    entities:
+      - entity: number.sg_ready_boost_procent
+        name: Boost — billigaste timmar
+        icon: mdi:arrow-up-bold-circle
+      - entity: number.sg_ready_block_procent
+        name: Block — dyraste timmar
+        icon: mdi:arrow-down-bold-circle
+      - entity: number.sg_ready_mintemperatur
+        name: Mintemperatur (block-skydd)
+        icon: mdi:thermometer-low
+
+  # ── Produktionsöverstyrning ────────────────────────────────────────────────
+  - type: entities
+    title: Produktionsöverstyrning (solceller)
+    icon: mdi:solar-power
+    show_header_toggle: false
+    entities:
+      - entity: number.sg_ready_produktion_normal_troskel
+        name: Normal-tröskel (W)
+        icon: mdi:solar-power
+      - entity: number.sg_ready_produktion_boost_troskel
+        name: Boost-tröskel (W)
+        icon: mdi:solar-power-variant
+      - entity: number.sg_ready_produktion_atergangstroskel
+        name: Återgångs-tröskel (W)
+        icon: mdi:transmission-tower-import
+      - entity: number.sg_ready_produktion_hysteres
+        name: Hysteres (W)
+        icon: mdi:sine-wave
+      - entity: number.sg_ready_produktion_aktiveringstid
+        name: Aktiveringstid (s)
+        icon: mdi:timer-sand
+      - entity: number.sg_ready_produktion_avstaengningstid
+        name: Avstängningstid (s)
+        icon: mdi:timer-off
