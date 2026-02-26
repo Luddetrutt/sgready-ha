@@ -79,10 +79,18 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         self._grid_power: float = 0.0
         self._grid_timestamp: datetime | None = None
 
-        # Konfiguration (uppdateras från number-entiteter)
+        # Konfiguration — pris
         self.boost_pct: float = entry.data.get(CONF_BOOST_PCT, DEFAULT_BOOST_PCT)
         self.block_pct: float = entry.data.get(CONF_BLOCK_PCT, DEFAULT_BLOCK_PCT)
         self.min_temp: float = entry.data.get(CONF_MIN_TEMP, DEFAULT_MIN_TEMP)
+
+        # Konfiguration — production override (tweakbara per solanläggning)
+        self.prod_normal_threshold: float = entry.data.get(CONF_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_NORMAL_THRESHOLD)
+        self.prod_boost_threshold: float = entry.data.get(CONF_PROD_BOOST_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD)
+        self.prod_return_threshold: float = entry.data.get(CONF_PROD_RETURN_THRESHOLD, DEFAULT_PROD_RETURN_THRESHOLD)
+        self.prod_hysteresis: float = entry.data.get(CONF_PROD_HYSTERESIS, DEFAULT_PROD_HYSTERESIS)
+        self.prod_min_duration: float = entry.data.get(CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
+        self.prod_off_delay: float = entry.data.get(CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
 
     # ── AI Override properties ──────────────────────────────────────────────
 
@@ -405,13 +413,13 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         if not self.entry.data.get(CONF_PROD_ENABLED, True):
             return original_mode, original_reason, False
 
-        # Hämta config
-        normal_threshold = self.entry.data.get(CONF_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_NORMAL_THRESHOLD)
-        boost_threshold = self.entry.data.get(CONF_PROD_BOOST_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD)
-        return_threshold = self.entry.data.get(CONF_PROD_RETURN_THRESHOLD, DEFAULT_PROD_RETURN_THRESHOLD)
-        hysteresis = self.entry.data.get(CONF_PROD_HYSTERESIS, DEFAULT_PROD_HYSTERESIS)
-        min_duration = self.entry.data.get(CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
-        off_delay = self.entry.data.get(CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
+        # Hämta config från live-inställningar (tweakbara via HA-sliders)
+        normal_threshold = self.prod_normal_threshold
+        boost_threshold = self.prod_boost_threshold
+        return_threshold = self.prod_return_threshold
+        hysteresis = self.prod_hysteresis
+        min_duration = self.prod_min_duration
+        off_delay = self.prod_off_delay
 
         # Hämta mätardata
         grid_entity = self.entry.data.get(CONF_GRID_POWER_ENTITY)
