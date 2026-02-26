@@ -9,17 +9,27 @@ from .const import (
     DOMAIN,
     CONF_MQTT_TOPIC, CONF_MQTT_AI_TOPIC,
     CONF_NORDPOOL_CONFIG_ENTRY, CONF_NORDPOOL_AREA,
-    CONF_TEMP_ENTITY, CONF_BOOST_PCT, CONF_BLOCK_PCT, CONF_MIN_TEMP,
+    CONF_TEMP_ENTITY, CONF_TARIFF_ENTITY,
+    CONF_GRID_POWER_ENTITY, CONF_PROD_ENABLED,
+    CONF_BOOST_PCT, CONF_BLOCK_PCT, CONF_MIN_TEMP,
     DEFAULT_MQTT_TOPIC, DEFAULT_MQTT_AI_TOPIC,
     DEFAULT_BOOST_PCT, DEFAULT_BLOCK_PCT, DEFAULT_MIN_TEMP,
 )
 
 STEP_USER_SCHEMA = vol.Schema({
+    # Nord Pool
     vol.Required(CONF_NORDPOOL_CONFIG_ENTRY): str,
     vol.Required(CONF_NORDPOOL_AREA, default="SE4"): str,
-    vol.Optional(CONF_TEMP_ENTITY, default=""): str,
+    # MQTT
     vol.Required(CONF_MQTT_TOPIC, default=DEFAULT_MQTT_TOPIC): str,
     vol.Required(CONF_MQTT_AI_TOPIC, default=DEFAULT_MQTT_AI_TOPIC): str,
+    # Temperatursensor (valfri)
+    vol.Optional(CONF_TEMP_ENTITY, default=""): str,
+    # Elmätare för production override (valfri — lämna tomt om ej tillgänglig)
+    vol.Optional(CONF_GRID_POWER_ENTITY, default=""): str,
+    vol.Optional(CONF_TARIFF_ENTITY, default=""): str,
+    vol.Optional(CONF_PROD_ENABLED, default=True): bool,
+    # Prisalgoritm
     vol.Required(CONF_BOOST_PCT, default=DEFAULT_BOOST_PCT): vol.Coerce(float),
     vol.Required(CONF_BLOCK_PCT, default=DEFAULT_BLOCK_PCT): vol.Coerce(float),
     vol.Required(CONF_MIN_TEMP, default=DEFAULT_MIN_TEMP): vol.Coerce(float),
