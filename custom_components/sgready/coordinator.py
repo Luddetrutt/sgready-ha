@@ -22,6 +22,14 @@ from .const import (
     DEFAULT_BOOST_PCT, DEFAULT_BLOCK_PCT, DEFAULT_MIN_TEMP,
     DEFAULT_MQTT_TOPIC, DEFAULT_MQTT_AI_TOPIC,
     MIN_SPREAD_TO_ACT, PRICE_ROUND_TO, EXTREME_LOW, EXTREME_HIGH,
+    CONF_GRID_POWER_ENTITY,
+    CONF_PROD_ENABLED,
+    CONF_PROD_NORMAL_THRESHOLD, CONF_PROD_BOOST_THRESHOLD,
+    CONF_PROD_RETURN_THRESHOLD, CONF_PROD_HYSTERESIS,
+    CONF_PROD_MIN_DURATION, CONF_PROD_OFF_DELAY,
+    DEFAULT_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD,
+    DEFAULT_PROD_RETURN_THRESHOLD, DEFAULT_PROD_HYSTERESIS,
+    DEFAULT_PROD_MIN_DURATION, DEFAULT_PROD_OFF_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -419,16 +427,6 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         Returnerar (new_mode, reason, override_active).
         Portat direkt från Node-RED 'Production Override Logic (med hysteres)'.
         """
-        from .const import (
-            CONF_GRID_POWER_ENTITY, CONF_TARIFF_ENTITY, CONF_PROD_ENABLED,
-            CONF_PROD_NORMAL_THRESHOLD, CONF_PROD_BOOST_THRESHOLD,
-            CONF_PROD_RETURN_THRESHOLD, CONF_PROD_HYSTERESIS,
-            CONF_PROD_MIN_DURATION, CONF_PROD_OFF_DELAY,
-            DEFAULT_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD,
-            DEFAULT_PROD_RETURN_THRESHOLD, DEFAULT_PROD_HYSTERESIS,
-            DEFAULT_PROD_MIN_DURATION, DEFAULT_PROD_OFF_DELAY,
-        )
-
         # Enabled?
         if not self.entry.data.get(CONF_PROD_ENABLED, True):
             return original_mode, original_reason, False
@@ -550,7 +548,6 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         """Returnerar nedräkningsstatus för production override (som Node-RED status-text)."""
         s = self._prod_state
         now = datetime.now()
-        from .const import CONF_PROD_MIN_DURATION, CONF_PROD_OFF_DELAY, DEFAULT_PROD_MIN_DURATION, DEFAULT_PROD_OFF_DELAY
         min_duration = self.entry.data.get(CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
         off_delay = self.entry.data.get(CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
 
