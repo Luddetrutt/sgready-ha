@@ -33,6 +33,11 @@ def _nordpool_entries(hass) -> list[dict]:
     return entries
 
 
+def _conf(entry, key, default=None):
+    """Läs config — options har högre prioritet än data."""
+    return entry.options.get(key, entry.data.get(key, default))
+
+
 class SGReadyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -61,16 +66,9 @@ class SGReadyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
             vol.Required(CONF_MQTT_TOPIC, default=DEFAULT_MQTT_TOPIC): str,
             vol.Optional(CONF_MQTT_AI_TOPIC, default=DEFAULT_MQTT_AI_TOPIC): str,
-            vol.Optional(CONF_TEMP_ENTITY, default=""): selector.selector({
+            vol.Optional(CONF_TEMP_ENTITY): selector.selector({
                 "entity": {"domain": "sensor", "device_class": "temperature"},
             }),
-            vol.Optional(CONF_GRID_POWER_ENTITY, default=""): selector.selector({
-                "entity": {"domain": "sensor", "device_class": "power"},
-            }),
-            vol.Optional(CONF_TARIFF_ENTITY, default=""): selector.selector({
-                "entity": {"domain": ["sensor", "input_select", "select"]},
-            }),
-            vol.Optional(CONF_PROD_ENABLED, default=True): bool,
         })
 
         return self.async_show_form(
@@ -93,12 +91,36 @@ class SGReadyOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        d = self._entry.data
+        e = self._entry
         schema = vol.Schema({
-            vol.Required(CONF_BOOST_PCT, default=d.get(CONF_BOOST_PCT, DEFAULT_BOOST_PCT)): vol.Coerce(float),
-            vol.Required(CONF_BLOCK_PCT, default=d.get(CONF_BLOCK_PCT, DEFAULT_BLOCK_PCT)): vol.Coerce(float),
-            vol.Required(CONF_MIN_TEMP, default=d.get(CONF_MIN_TEMP, DEFAULT_MIN_TEMP)): vol.Coerce(float),
-            vol.Required(CONF_MQTT_TOPIC, default=d.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)): str,
-            vol.Optional(CONF_MQTT_AI_TOPIC, default=d.get(CONF_MQTT_AI_TOPIC, DEFAULT_MQTT_AI_TOPIC)): str,
+            # ── Prisstyrning ──────────────────────────────────────────────
+            vol.Required(CONF_BOOST_PCT, default=_conf(e, CONF_BOOST_PCT, DEFAULT_BOOST_PCT)): selector.selector({
+                "number": {"min": 1, "max": 49, "step": 1, "mode": "slider", "unit_of_measurement": "%"},
+            }),
+            vol.Required(CONF_BLOCK_PCT, default=_conf(e, CONF_BLOCK_PCT, DEFAULT_BLOCK_PCT)): selector.selector({
+                "number": {"min": 1, "max": 49, "step": 1, "mode": "slider", "unit_of_measurement": "%"},
+            }),
+            vol.Required(CONF_MIN_TEMP, default=_conf(e, CONF_MIN_TEMP, DEFAULT_MIN_TEMP)): selector.selector({
+                "number": {"min": 10, "max": 30, "step": 0.5, "mode": "slider", "unit_of_measurement": "°C"},
+            }),
+
+            # ── MQTT ──────────────────────────────────────────────────────
+            vol.Required(CONF_MQTT_TOPIC, default=_conf(e, CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)): str,
+            vol.Optional(CONF_MQTT_AI_TOPIC, default=_conf(e, CONF_MQTT_AI_TOPIC, DEFAULT_MQTT_AI_TOPIC)): str,
+
+            # ── Entiteter ─────────────────────────────────────────────────
+            vol.Optional(CONF_TEMP_ENTITY, default=_conf(e, CONF_TEMP_ENTITY, "")): selector.selector({
+                "entity": {"domain": "sensor", "device_class": "temperature"},
+            }),
+            vol.Optional(CONF_TARIFF_ENTITY, default=_conf(e, CONF_TARIFF_ENTITY, "")): selector.selector({
+                "entity": {"domain": ["sensor", "input_select", "select"]},
+            }),
+
+            # ── Produktions-override (kräver elmätare) ────────────────────
+            vol.Optional(CONF_PROD_ENABLED, default=_conf(e, CONF_PROD_ENABLED, False)): bool,
+            vol.Optional(CONF_GRID_POWER_ENTITY, default=_conf(e, CONF_GRID_POWER_ENTITY, "")): selector.selector({
+                "entity": {"domain": "sensor", "device_class": "power"},
+            }),
         })
+
         return self.async_show_form(step_id="init", data_schema=schema)

@@ -36,6 +36,11 @@ _LOGGER = logging.getLogger(__name__)
 UPDATE_INTERVAL = timedelta(minutes=5)
 
 
+def _conf(entry, key, default=None):
+    """Läs config — options har högre prioritet än data."""
+    return entry.options.get(key, entry.data.get(key, default))
+
+
 def _round_price(p: float) -> float:
     return round(p * 100 / (PRICE_ROUND_TO * 100)) * PRICE_ROUND_TO
 
@@ -88,17 +93,17 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         self._grid_timestamp: datetime | None = None
 
         # Konfiguration — pris
-        self.boost_pct: float = entry.data.get(CONF_BOOST_PCT, DEFAULT_BOOST_PCT)
-        self.block_pct: float = entry.data.get(CONF_BLOCK_PCT, DEFAULT_BLOCK_PCT)
-        self.min_temp: float = entry.data.get(CONF_MIN_TEMP, DEFAULT_MIN_TEMP)
+        self.boost_pct: float = _conf(entry, CONF_BOOST_PCT, DEFAULT_BOOST_PCT)
+        self.block_pct: float = _conf(entry, CONF_BLOCK_PCT, DEFAULT_BLOCK_PCT)
+        self.min_temp: float = _conf(entry, CONF_MIN_TEMP, DEFAULT_MIN_TEMP)
 
         # Konfiguration — production override (tweakbara per solanläggning)
-        self.prod_normal_threshold: float = entry.data.get(CONF_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_NORMAL_THRESHOLD)
-        self.prod_boost_threshold: float = entry.data.get(CONF_PROD_BOOST_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD)
-        self.prod_return_threshold: float = entry.data.get(CONF_PROD_RETURN_THRESHOLD, DEFAULT_PROD_RETURN_THRESHOLD)
-        self.prod_hysteresis: float = entry.data.get(CONF_PROD_HYSTERESIS, DEFAULT_PROD_HYSTERESIS)
-        self.prod_min_duration: float = entry.data.get(CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
-        self.prod_off_delay: float = entry.data.get(CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
+        self.prod_normal_threshold: float = _conf(entry, CONF_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_NORMAL_THRESHOLD)
+        self.prod_boost_threshold: float = _conf(entry, CONF_PROD_BOOST_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD)
+        self.prod_return_threshold: float = _conf(entry, CONF_PROD_RETURN_THRESHOLD, DEFAULT_PROD_RETURN_THRESHOLD)
+        self.prod_hysteresis: float = _conf(entry, CONF_PROD_HYSTERESIS, DEFAULT_PROD_HYSTERESIS)
+        self.prod_min_duration: float = _conf(entry, CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
+        self.prod_off_delay: float = _conf(entry, CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
 
     # ── AI Override properties ──────────────────────────────────────────────
 
@@ -147,7 +152,7 @@ class SGReadyCoordinator(DataUpdateCoordinator):
 
     async def async_start_ai_mqtt(self) -> None:
         """Prenumerera på MQTT-topic för AI-kommandon."""
-        topic = self.entry.data.get(CONF_MQTT_AI_TOPIC, DEFAULT_MQTT_AI_TOPIC)
+        topic = _conf(self.entry, CONF_MQTT_AI_TOPIC, DEFAULT_MQTT_AI_TOPIC)
 
         @callback
         def _on_ai_command(msg) -> None:
@@ -187,9 +192,9 @@ class SGReadyCoordinator(DataUpdateCoordinator):
                 "get_prices_for_date",
                 {
                     "date": date_str,
-                    "areas": self.entry.data.get(CONF_NORDPOOL_AREA, "SE4"),
+                    "areas": _conf(self.entry, CONF_NORDPOOL_AREA, "SE4"),
                     "currency": "SEK",
-                    "config_entry": self.entry.data.get(CONF_NORDPOOL_CONFIG_ENTRY),
+                    "config_entry": _conf(self.entry, CONF_NORDPOOL_CONFIG_ENTRY),
                 },
                 blocking=True,
                 return_response=True,
@@ -198,7 +203,7 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             if isinstance(response, list):
                 return [float(p) for p in response if p is not None]
             if isinstance(response, dict):
-                area = self.entry.data.get(CONF_NORDPOOL_AREA, "SE4")
+                area = _conf(self.entry, CONF_NORDPOOL_AREA, "SE4")
                 prices = response.get(area, response.get("prices", []))
                 return [float(p) for p in prices if p is not None]
         except Exception as err:
@@ -367,7 +372,7 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         # POST-3: Tariff blockerar boost globalt (sista steget, efter alla overrides)
         tariff_blocked = False
         if sg_mode == MODE_BOOST and not ai_override_active:
-            tariff_entity = self.entry.data.get(CONF_TARIFF_ENTITY)
+            tariff_entity = _conf(self.entry, CONF_TARIFF_ENTITY)
             if tariff_entity:
                 t_state = self.hass.states.get(tariff_entity)
                 if t_state and t_state.state in ("on", "true", "1", "active"):
@@ -428,7 +433,7 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         Portat direkt från Node-RED 'Production Override Logic (med hysteres)'.
         """
         # Enabled?
-        if not self.entry.data.get(CONF_PROD_ENABLED, True):
+        if not _conf(self.entry, CONF_PROD_ENABLED, True):
             return original_mode, original_reason, False
 
         # Hämta config från live-inställningar (tweakbara via HA-sliders)
@@ -440,7 +445,7 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         off_delay = self.prod_off_delay
 
         # Hämta mätardata
-        grid_entity = self.entry.data.get(CONF_GRID_POWER_ENTITY)
+        grid_entity = _conf(self.entry, CONF_GRID_POWER_ENTITY)
         if not grid_entity:
             return original_mode, original_reason, False
 
@@ -462,7 +467,7 @@ class SGReadyCoordinator(DataUpdateCoordinator):
 
         # Tariff-status
         in_tariff_period = False
-        tariff_entity = self.entry.data.get(CONF_TARIFF_ENTITY)
+        tariff_entity = _conf(self.entry, CONF_TARIFF_ENTITY)
         if tariff_entity:
             t_state = self.hass.states.get(tariff_entity)
             if t_state:
@@ -548,8 +553,8 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         """Returnerar nedräkningsstatus för production override (som Node-RED status-text)."""
         s = self._prod_state
         now = datetime.now()
-        min_duration = self.entry.data.get(CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
-        off_delay = self.entry.data.get(CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
+        min_duration = _conf(self.entry, CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
+        off_delay = _conf(self.entry, CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
 
         if s["active"] and s["in_hysteresis"] and s["last_change"]:
             time_left = off_delay - (now - s["last_change"]).total_seconds()
@@ -563,7 +568,7 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         return {"state": "passive", "seconds_left": 0}
 
     def _get_indoor_temp(self) -> float | None:
-        temp_entity = self.entry.data.get(CONF_TEMP_ENTITY)
+        temp_entity = _conf(self.entry, CONF_TEMP_ENTITY)
         if not temp_entity:
             return None
         state = self.hass.states.get(temp_entity)
@@ -575,6 +580,6 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             return None
 
     async def _publish_mqtt(self, mode: str) -> None:
-        topic = self.entry.data.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
+        topic = _conf(self.entry, CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
         await mqtt.async_publish(self.hass, topic, mode, qos=1, retain=True)
         _LOGGER.debug("MQTT → %s: %s", topic, mode)
