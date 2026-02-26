@@ -1,49 +1,37 @@
-"""SG Ready koordinator — portad direkt från Node-RED-algoritmen."""
+"""SG Ready koordinator — portad från Node-RED + AI-override handles."""
 from __future__ import annotations
 
+import json
 import logging
 import math
 from datetime import datetime, timedelta
 
 from homeassistant.components import mqtt
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util.dt import now as ha_now, parse_datetime
 
 from .const import (
     DOMAIN,
-    MODE_BOOST,
-    MODE_NORMAL,
-    MODE_BLOCK,
-    CONF_MQTT_TOPIC,
-    CONF_PRICE_ENTITY,
-    CONF_TEMP_ENTITY,
-    CONF_BOOST_PCT,
-    CONF_BLOCK_PCT,
-    CONF_MIN_TEMP,
-    DEFAULT_BOOST_PCT,
-    DEFAULT_BLOCK_PCT,
-    DEFAULT_MIN_TEMP,
-    DEFAULT_MQTT_TOPIC,
+    MODE_BOOST, MODE_NORMAL, MODE_BLOCK,
+    AI_MODE_AUTO, AI_MODE_FORCE_BOOST, AI_MODE_FORCE_NORMAL, AI_MODE_FORCE_BLOCK,
+    CONF_MQTT_TOPIC, CONF_MQTT_AI_TOPIC,
+    CONF_NORDPOOL_CONFIG_ENTRY, CONF_NORDPOOL_AREA,
+    CONF_TEMP_ENTITY, CONF_BOOST_PCT, CONF_BLOCK_PCT, CONF_MIN_TEMP,
+    DEFAULT_BOOST_PCT, DEFAULT_BLOCK_PCT, DEFAULT_MIN_TEMP,
+    DEFAULT_MQTT_TOPIC, DEFAULT_MQTT_AI_TOPIC,
+    MIN_SPREAD_TO_ACT, PRICE_ROUND_TO, EXTREME_LOW, EXTREME_HIGH,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
 UPDATE_INTERVAL = timedelta(minutes=5)
-
-# Algoritm-konstanter (speglar Node-RED-flödet)
-MIN_SPREAD_TO_ACT = 0.10   # 10 öre — under detta = alltid normal
-PRICE_ROUND_TO = 0.10      # Avrundning till närmaste 10 öre
-EXTREME_LOW = 0.10         # Under detta = alltid boost
-EXTREME_HIGH = 5.0         # Över detta = alltid block
 
 
 def _round_price(p: float) -> float:
-    """Avrunda pris till närmaste PRICE_ROUND_TO (undviker floatfel)."""
     return round(p * 100 / (PRICE_ROUND_TO * 100)) * PRICE_ROUND_TO
 
 
 def _calculate_stats(prices: list[float]) -> dict | None:
-    """Beräkna statistik för ett prisfönster."""
     valid = [p for p in prices if p is not None and not math.isnan(p)]
     if not valid:
         return None
@@ -56,8 +44,6 @@ def _calculate_stats(prices: list[float]) -> dict | None:
         "min": min(valid),
         "max": max(valid),
         "std": math.sqrt(variance),
-        "q1": sorted_p[n // 4],
-        "q3": sorted_p[(n * 3) // 4],
         "median": sorted_p[n // 2],
         "count": n,
         "sorted": sorted_p,
@@ -68,92 +54,152 @@ class SGReadyCoordinator(DataUpdateCoordinator):
     """Hanterar prisdata och beräknar SG Ready-läge."""
 
     def __init__(self, hass: HomeAssistant, entry) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=UPDATE_INTERVAL,
-        )
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=UPDATE_INTERVAL)
         self.entry = entry
-        self._override = False
+        self._manual_override = False  # Manuell boost-switch
+
+        # AI override state
+        self._ai_mode: str = AI_MODE_AUTO
+        self._ai_until: datetime | None = None
+        self._ai_reason: str = ""
+        self._mqtt_unsub = None
+
+        # Konfiguration (uppdateras från number-entiteter)
         self.boost_pct: float = entry.data.get(CONF_BOOST_PCT, DEFAULT_BOOST_PCT)
         self.block_pct: float = entry.data.get(CONF_BLOCK_PCT, DEFAULT_BLOCK_PCT)
         self.min_temp: float = entry.data.get(CONF_MIN_TEMP, DEFAULT_MIN_TEMP)
 
-    @property
-    def override(self) -> bool:
-        return self._override
+    # ── AI Override properties ──────────────────────────────────────────────
 
-    @override.setter
-    def override(self, value: bool) -> None:
-        self._override = value
+    @property
+    def ai_mode(self) -> str:
+        """Returnerar aktuellt AI-läge, auto om utgångstid passerat."""
+        if self._ai_mode != AI_MODE_AUTO and self._ai_until:
+            if ha_now() > self._ai_until:
+                _LOGGER.info("AI-override utgången — återgår till auto")
+                self._ai_mode = AI_MODE_AUTO
+                self._ai_reason = ""
+                self._ai_until = None
+        return self._ai_mode
+
+    @ai_mode.setter
+    def ai_mode(self, value: str) -> None:
+        self._ai_mode = value
         self.hass.async_create_task(self.async_refresh())
 
-    async def _async_update_data(self) -> dict:
-        """Hämta prisdata, beräkna läge och publicera via MQTT."""
+    @property
+    def ai_until(self) -> datetime | None:
+        return self._ai_until
+
+    @ai_until.setter
+    def ai_until(self, value: datetime | None) -> None:
+        self._ai_until = value
+
+    @property
+    def ai_reason(self) -> str:
+        return self._ai_reason
+
+    @ai_reason.setter
+    def ai_reason(self, value: str) -> None:
+        self._ai_reason = value
+
+    @property
+    def manual_override(self) -> bool:
+        return self._manual_override
+
+    @manual_override.setter
+    def manual_override(self, value: bool) -> None:
+        self._manual_override = value
+        self.hass.async_create_task(self.async_refresh())
+
+    # ── MQTT AI-kommandolyssning ────────────────────────────────────────────
+
+    async def async_start_ai_mqtt(self) -> None:
+        """Prenumerera på MQTT-topic för AI-kommandon."""
+        topic = self.entry.data.get(CONF_MQTT_AI_TOPIC, DEFAULT_MQTT_AI_TOPIC)
+
+        @callback
+        def _on_ai_command(msg) -> None:
+            try:
+                payload = json.loads(msg.payload)
+                mode = payload.get("mode", AI_MODE_AUTO)
+                reason = payload.get("reason", "AI-kommando")
+                until_str = payload.get("until")
+                until = parse_datetime(until_str) if until_str else None
+
+                _LOGGER.info("AI-kommando mottaget: mode=%s, reason=%s, until=%s", mode, reason, until)
+                self._ai_mode = mode
+                self._ai_reason = reason
+                self._ai_until = until
+                self.hass.async_create_task(self.async_refresh())
+            except (json.JSONDecodeError, Exception) as err:
+                _LOGGER.warning("Ogiltigt AI-MQTT-kommando: %s", err)
+
+        self._mqtt_unsub = await mqtt.async_subscribe(self.hass, topic, _on_ai_command)
+        _LOGGER.info("Lyssnar på AI-kommandon via MQTT: %s", topic)
+
+    async def async_stop_ai_mqtt(self) -> None:
+        if self._mqtt_unsub:
+            self._mqtt_unsub()
+            self._mqtt_unsub = None
+
+    # ── Prisfetching via Nord Pool-action ───────────────────────────────────
+
+    async def _fetch_prices(self, date_str: str) -> list[float]:
+        """Hämta timpriser via nordpool.get_prices_for_date."""
         try:
-            today_prices, tomorrow_prices = self._get_prices()
-            result = self._calculate_mode(today_prices, tomorrow_prices)
-
-            # Manuell override slår alltid till boost
-            if self._override:
-                result["mode"] = MODE_BOOST
-                result["reason"] = "⚡ Manuell boost-override aktiv"
-                result["override"] = True
-
-            await self._publish_mqtt(result["mode"])
-            result["override"] = self._override
-            return result
-
+            response = await self.hass.services.async_call(
+                "nordpool",
+                "get_prices_for_date",
+                {
+                    "date": date_str,
+                    "areas": self.entry.data.get(CONF_NORDPOOL_AREA, "SE4"),
+                    "currency": "SEK",
+                    "config_entry": self.entry.data.get(CONF_NORDPOOL_CONFIG_ENTRY),
+                },
+                blocking=True,
+                return_response=True,
+            )
+            # Svarsformatet: lista med timpris eller dict med areas
+            if isinstance(response, list):
+                return [float(p) for p in response if p is not None]
+            if isinstance(response, dict):
+                area = self.entry.data.get(CONF_NORDPOOL_AREA, "SE4")
+                prices = response.get(area, response.get("prices", []))
+                return [float(p) for p in prices if p is not None]
         except Exception as err:
-            raise UpdateFailed(f"Fel vid uppdatering: {err}") from err
+            _LOGGER.warning("Kunde inte hämta priser för %s: %s", date_str, err)
+        return []
 
-    def _get_prices(self) -> tuple[list, list]:
-        """Hämta timpriser från Nord Pool-sensorn."""
-        price_entity = self.entry.data.get(CONF_PRICE_ENTITY)
-        state = self.hass.states.get(price_entity)
+    # ── Huvuduppdatering ────────────────────────────────────────────────────
 
-        if not state or state.state in ("unknown", "unavailable"):
-            _LOGGER.warning("Kan inte läsa prisdata från %s", price_entity)
-            return [], []
+    async def _async_update_data(self) -> dict:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        attrs = state.attributes
-        today = attrs.get("today", [])
-        tomorrow = attrs.get("tomorrow", [])
+        today = await self._fetch_prices(today_str)
+        tomorrow = await self._fetch_prices(tomorrow_str)
 
-        # Stöd för raw_today/raw_tomorrow (nyare Nord Pool-integration)
-        if not today:
-            today = [h.get("value", 0) for h in attrs.get("raw_today", [])]
-        if not tomorrow:
-            tomorrow = [h.get("value", 0) for h in attrs.get("raw_tomorrow", [])]
+        result = self._calculate_mode(today, tomorrow)
+        await self._publish_mqtt(result["mode"])
+        return result
 
-        return today, tomorrow
+    # ── Algoritm ────────────────────────────────────────────────────────────
 
-    def _build_window(
-        self,
-        today: list,
-        tomorrow: list,
-        current_hour: int,
-        perspective_hours: int = 24,
-    ) -> tuple[list[float], bool]:
-        """Bygg ett centrerat analysfönster av timpriser."""
+    def _build_window(self, today, tomorrow, current_hour, perspective_hours=24):
         hours_back = perspective_hours // 2
         hours_forward = perspective_hours - hours_back
         has_tomorrow = bool(tomorrow)
-
         window = []
 
-        # Bakåt
         for i in range(hours_back, 0, -1):
             h = current_hour - i
-            if h >= 0 and h < len(today) and today[h] is not None:
+            if 0 <= h < len(today) and today[h] is not None:
                 window.append(float(today[h]))
 
-        # Nuvarande
         if current_hour < len(today) and today[current_hour] is not None:
             window.append(float(today[current_hour]))
 
-        # Framåt
         for i in range(1, hours_forward):
             h = current_hour + i
             if h < 24 and h < len(today) and today[h] is not None:
@@ -166,148 +212,140 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         return window, has_tomorrow
 
     def _calculate_mode(self, today: list, tomorrow: list) -> dict:
-        """Beräkna SG Ready-läge — exakt portad från Node-RED-algoritmen."""
         current_hour = datetime.now().hour
-        perspective_hours = 24
-
-        # Bygg analysfönster
-        window, has_tomorrow = self._build_window(today, tomorrow, current_hour, perspective_hours)
+        window, has_tomorrow = self._build_window(today, tomorrow, current_hour)
         window_stats = _calculate_stats(window)
 
-        # Aktuellt pris
         current_price = float(today[current_hour]) if current_hour < len(today) else 0.0
 
-        # Beräkna percentil med avrundade priser
+        boost_percentile = self.boost_pct
+        block_percentile = 100 - self.block_pct
+
         price_percentile = 50.0
         boost_threshold = None
         block_threshold = None
 
-        # BOOST_PERCENTILE = boost_pct, BLOCK_PERCENTILE = 100 - block_pct
-        boost_percentile = self.boost_pct
-        block_percentile = 100 - self.block_pct
-
         if window_stats and window:
             rounded_current = _round_price(current_price)
             rounded_window = [_round_price(p) for p in window_stats["sorted"]]
-
             lower_count = sum(1 for p in rounded_window if p < rounded_current)
             price_percentile = (lower_count / len(rounded_window)) * 100
 
-            boost_idx = min(
-                math.floor(len(rounded_window) * boost_percentile / 100),
-                len(rounded_window) - 1,
-            )
-            block_idx = min(
-                math.floor(len(rounded_window) * block_percentile / 100),
-                len(rounded_window) - 1,
-            )
+            boost_idx = min(math.floor(len(rounded_window) * boost_percentile / 100), len(rounded_window) - 1)
+            block_idx = min(math.floor(len(rounded_window) * block_percentile / 100), len(rounded_window) - 1)
             boost_threshold = rounded_window[boost_idx]
             block_threshold = rounded_window[block_idx]
 
-        # Prisspridning
         price_spread = (window_stats["max"] - window_stats["min"]) if window_stats else 0
         insignificant_spread = price_spread < MIN_SPREAD_TO_ACT
+        window_avg = window_stats["avg"] if window_stats else None
+        price_vs_avg = (current_price / window_avg) if window_avg else 1.0
+        diff_from_avg = abs(current_price - window_avg) if window_avg else 0.0
 
-        # === BESLUTSLOGIK (prioritetsordning från Node-RED) ===
+        # ── BESLUTSLOGIK ─────────────────────────────────────────────────────
+
         sg_mode = MODE_NORMAL
         reason = ""
-        confidence = 75
+        confidence = 0
         temp_override_active = False
+        ai_override_active = False
 
-        # P1: Minimal prisspridning
-        if insignificant_spread:
+        # P0: AI OVERRIDE (högsta prioritet)
+        effective_ai_mode = self.ai_mode  # Kontrollerar utgångstid
+        if self._manual_override:
+            sg_mode = MODE_BOOST
+            reason = "⚡ Manuell boost-override"
+            confidence = 100
+        elif effective_ai_mode == AI_MODE_FORCE_BOOST:
+            sg_mode = MODE_BOOST
+            reason = f"🤖 AI: {self._ai_reason or 'Force boost'}"
+            confidence = 100
+            ai_override_active = True
+        elif effective_ai_mode == AI_MODE_FORCE_NORMAL:
+            sg_mode = MODE_NORMAL
+            reason = f"🤖 AI: {self._ai_reason or 'Force normal'}"
+            confidence = 100
+            ai_override_active = True
+        elif effective_ai_mode == AI_MODE_FORCE_BLOCK:
+            sg_mode = MODE_BLOCK
+            reason = f"🤖 AI: {self._ai_reason or 'Force block'}"
+            confidence = 100
+            ai_override_active = True
+
+        # P1–P4: Normal algoritm
+        elif insignificant_spread:
             sg_mode = MODE_NORMAL
             reason = f"Minimal prisspridning ({price_spread * 100:.0f} öre)"
             confidence = 85
-
-        # P2: Extrempriser
         elif current_price < EXTREME_LOW:
             sg_mode = MODE_BOOST
             reason = "⚡ Extremt lågt pris (<10 öre)"
             confidence = 100
-
         elif current_price > EXTREME_HIGH:
             sg_mode = MODE_BLOCK
             reason = "⚠️ Extremt högt pris (>5 kr)"
             confidence = 100
-
-        # P3: Percentilbaserad
         elif price_percentile <= boost_percentile:
             sg_mode = MODE_BOOST
             reason = f"Låg percentil P{price_percentile:.0f} (billigaste {self.boost_pct:.0f}%)"
             confidence = 85
-
         elif price_percentile >= block_percentile:
             sg_mode = MODE_BLOCK
             reason = f"Hög percentil P{price_percentile:.0f} (dyraste {self.block_pct:.0f}%)"
             confidence = 85
-
-        # P4: Normal
         else:
             sg_mode = MODE_NORMAL
             reason = f"Normalläge P{price_percentile:.0f}"
             confidence = 75
 
-        # SIST: Temperaturskydd — förhindrar endast BLOCK
+        # SIST: Temperaturskydd (förhindrar bara block, ej AI-override)
         indoor_temp = self._get_indoor_temp()
-        if indoor_temp is not None and indoor_temp < self.min_temp and sg_mode == MODE_BLOCK:
+        if not ai_override_active and indoor_temp is not None and indoor_temp < self.min_temp and sg_mode == MODE_BLOCK:
             sg_mode = MODE_NORMAL
             reason = f"🌡 Temp för låg ({indoor_temp:.1f}°C < {self.min_temp}°C) — förhindrar block"
             confidence = 95
             temp_override_active = True
-            _LOGGER.info("TEMPERATUR-OVERRIDE: Förhindrar block, temp=%.1f°C", indoor_temp)
 
-        # Sänk confidence om imorgondagens priser saknas sent på dagen
+        # Sänk confidence om imorgondagens priser saknas sent
         if not has_tomorrow and current_hour >= 18:
             confidence = max(50, confidence - 10)
             reason += " [begränsad data]"
         elif not has_tomorrow:
             confidence = max(55, confidence - 5)
 
-        window_avg = window_stats["avg"] if window_stats else None
-        window_min = window_stats["min"] if window_stats else None
-        window_max = window_stats["max"] if window_stats else None
-        price_vs_avg = (current_price / window_avg) if window_avg else 1.0
-        diff_from_avg = abs(current_price - window_avg) if window_avg else 0.0
-        spread_percent = (price_spread / window_avg * 100) if window_avg else 0.0
-
-        _LOGGER.info(
-            "SG Ready: %s | %s | P%.0f | pris=%.2f kr | spread=%.2f kr | conf=%d%%",
-            sg_mode.upper(), reason, price_percentile, current_price, price_spread, confidence,
-        )
+        _LOGGER.info("SG Ready: %s | %s | conf=%d%%", sg_mode.upper(), reason, confidence)
 
         return {
-            # Beslut
             "mode": sg_mode,
             "reason": reason,
             "confidence": confidence,
-            "temp_override_active": temp_override_active,
-            # Priser
             "current_price": current_price,
-            "indoor_temp": indoor_temp,
-            # Analys
             "price_percentile": round(price_percentile, 1),
             "price_vs_avg_pct": round(price_vs_avg * 100, 1),
             "diff_from_avg_ore": round(diff_from_avg * 100, 1),
             "price_spread": round(price_spread, 3),
-            "spread_pct": round(spread_percent, 1),
+            "spread_pct": round((price_spread / window_avg * 100) if window_avg else 0, 1),
             "insignificant_spread": insignificant_spread,
             "boost_threshold": round(boost_threshold, 3) if boost_threshold else None,
             "block_threshold": round(block_threshold, 3) if block_threshold else None,
-            # Fönster
             "window_size": len(window),
             "window_avg": round(window_avg, 3) if window_avg else None,
-            "window_min": round(window_min, 3) if window_min else None,
-            "window_max": round(window_max, 3) if window_max else None,
+            "window_min": round(window_stats["min"], 3) if window_stats else None,
+            "window_max": round(window_stats["max"], 3) if window_stats else None,
             "has_tomorrow": has_tomorrow,
-            # Konfiguration
+            "indoor_temp": indoor_temp,
+            "temp_override_active": temp_override_active,
+            "ai_override_active": ai_override_active,
+            "ai_mode": effective_ai_mode,
+            "ai_reason": self._ai_reason,
+            "ai_until": self._ai_until.isoformat() if self._ai_until else None,
+            "manual_override": self._manual_override,
             "boost_pct": self.boost_pct,
             "block_pct": self.block_pct,
             "min_temp": self.min_temp,
         }
 
     def _get_indoor_temp(self) -> float | None:
-        """Hämta inomhustemperatur."""
         temp_entity = self.entry.data.get(CONF_TEMP_ENTITY)
         if not temp_entity:
             return None
@@ -320,7 +358,6 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             return None
 
     async def _publish_mqtt(self, mode: str) -> None:
-        """Publicera läget till MQTT."""
         topic = self.entry.data.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
         await mqtt.async_publish(self.hass, topic, mode, qos=1, retain=True)
         _LOGGER.debug("MQTT → %s: %s", topic, mode)
