@@ -132,13 +132,12 @@ cards:
 
   # ── Orsak & AI-status ──────────────────────────────────────────────────────
   - type: markdown
-    content: >
+    content: |
       {% set d = state_attr('sensor.sg_ready_lage', 'reason') %}
       {% set ai = states('select.sg_ready_ai_override') %}
-      {% set ai_reason = state_attr('sensor.sg_ready_lage', 'ai_reason') %}
-      **Orsak:** {{ d or '–' }}
+      **Orsak:** {{ d or '-' }}
       {% if ai != 'auto' %}
-      ⚠️ **Manuellt läge aktivt** — håll inne Normal-knappen för att återgå till auto
+      **Manuellt lage aktivt** - hall inne Normal for att atergå till auto
       {% endif %}
 
   # ── Prisalgoritm-sliders ───────────────────────────────────────────────────
