@@ -77,6 +77,8 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         self._ai_until: datetime | None = None
         self._ai_reason: str = ""
         self._mqtt_unsub = None
+        self._nordpool_unsub = None   # Prenumeration på Nord Pool-uppdateringar
+        self._had_prices: bool = False  # Har vi fått priser någon gång?
 
         # Production override state machine
         self._prod_state = {
@@ -182,6 +184,39 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             self._mqtt_unsub()
             self._mqtt_unsub = None
 
+    # ── Nord Pool-lyssnare ──────────────────────────────────────────────────
+
+    def async_start_nordpool_listener(self) -> None:
+        """Prenumerera på Nord Pool-koordinatorn — refresha direkt vid ny data.
+
+        Nord Pool publicerar morgondagens priser ~kl 13. Utan denna lyssnare
+        kan det dröja upp till 60 min innan vi märker det (Nord Pools egna
+        uppdateringsintervall). Med lyssnaren refreshar vi inom sekunder.
+        """
+        nordpool_entry_id = _conf(self.entry, CONF_NORDPOOL_CONFIG_ENTRY)
+        nordpool_entry = self.hass.config_entries.async_get_entry(nordpool_entry_id)
+        if not nordpool_entry:
+            _LOGGER.warning("Kan inte starta Nord Pool-lyssnare — entry saknas")
+            return
+
+        coordinator = getattr(nordpool_entry, "runtime_data", None)
+        if not coordinator:
+            _LOGGER.warning("Kan inte starta Nord Pool-lyssnare — ingen coordinator")
+            return
+
+        @callback
+        def _on_nordpool_update() -> None:
+            _LOGGER.debug("Nord Pool uppdaterades — triggar SG Ready refresh")
+            self.hass.async_create_task(self.async_refresh())
+
+        self._nordpool_unsub = coordinator.async_add_listener(_on_nordpool_update)
+        _LOGGER.info("Prenumererar på Nord Pool-uppdateringar")
+
+    def async_stop_nordpool_listener(self) -> None:
+        if self._nordpool_unsub:
+            self._nordpool_unsub()
+            self._nordpool_unsub = None
+
     # ── Prisfetching via Nord Pool coordinator ──────────────────────────────
 
     async def _fetch_prices(self) -> tuple[list[float], list[float]]:
@@ -228,11 +263,21 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             return [], []
 
         if not today_prices:
-            _LOGGER.warning("Inga priser hittade för %s, area=%s", today_str, area)
+            if self._had_prices:
+                _LOGGER.warning(
+                    "Priser saknas plötsligt för %s area=%s — kör på normalläge tills data återkommer",
+                    today_str, area,
+                )
+            else:
+                _LOGGER.warning("Inga priser hittade för %s, area=%s", today_str, area)
         else:
+            self._had_prices = True
+            had_tomorrow = bool(tomorrow_prices)
             _LOGGER.debug(
-                "Nord Pool: %d timmar idag, %d imorgon (area=%s)",
-                len(today_prices), len(tomorrow_prices), area,
+                "Nord Pool: %d timmar idag%s (area=%s)",
+                len(today_prices),
+                f", {len(tomorrow_prices)} imorgon" if had_tomorrow else " — morgondagens priser saknas ännu",
+                area,
             )
 
         return today_prices, tomorrow_prices

@@ -15,6 +15,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SGReadyCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     await coordinator.async_start_ai_mqtt()
+    coordinator.async_start_nordpool_listener()
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
@@ -32,6 +33,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator: SGReadyCoordinator = hass.data[DOMAIN].get(entry.entry_id)
     if coordinator:
         await coordinator.async_stop_ai_mqtt()
+        coordinator.async_stop_nordpool_listener()
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
