@@ -158,8 +158,11 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             except (json.JSONDecodeError, Exception) as err:
                 _LOGGER.warning("Ogiltigt AI-MQTT-kommando: %s", err)
 
-        self._mqtt_unsub = await mqtt.async_subscribe(self.hass, topic, _on_ai_command)
-        _LOGGER.info("Lyssnar på AI-kommandon via MQTT: %s", topic)
+        try:
+            self._mqtt_unsub = await mqtt.async_subscribe(self.hass, topic, _on_ai_command)
+            _LOGGER.info("Lyssnar på AI-kommandon via MQTT: %s", topic)
+        except Exception as err:
+            _LOGGER.warning("Kunde inte prenumerera på AI MQTT-topic %s: %s", topic, err)
 
     async def async_stop_ai_mqtt(self) -> None:
         if self._mqtt_unsub:
@@ -203,8 +206,25 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         today = await self._fetch_prices(today_str)
         tomorrow = await self._fetch_prices(tomorrow_str)
 
-        result = self._calculate_mode(today, tomorrow)
-        await self._publish_mqtt(result["mode"])
+        try:
+            result = self._calculate_mode(today, tomorrow)
+        except Exception as err:
+            _LOGGER.error("Fel i _calculate_mode: %s", err, exc_info=True)
+            result = {"mode": MODE_NORMAL, "reason": "Beräkningsfel — normal fallback", "confidence": 0,
+                      "current_price": 0.0, "price_percentile": 50.0, "price_vs_avg_pct": 100.0,
+                      "diff_from_avg_ore": 0.0, "price_spread": 0.0, "spread_pct": 0.0,
+                      "insignificant_spread": True, "boost_threshold": None, "block_threshold": None,
+                      "window_size": 0, "window_avg": None, "window_min": None, "window_max": None,
+                      "has_tomorrow": False, "indoor_temp": None, "temp_override_active": False,
+                      "prod_override_active": False, "prod_override_mode": None,
+                      "prod_override_in_hysteresis": False, "prod_override_countdown": None,
+                      "tariff_blocked": False, "ai_override_active": False}
+
+        try:
+            await self._publish_mqtt(result["mode"])
+        except Exception as err:
+            _LOGGER.warning("MQTT-publicering misslyckades: %s", err)
+
         return result
 
     # ── Algoritm ────────────────────────────────────────────────────────────
