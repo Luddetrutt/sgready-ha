@@ -111,7 +111,7 @@ POST-3  Tariff                   → Nedgraderar boost → normal vid högtariff
 
 ---
 
-## Shelly-script
+## Shelly-script — SG Ready-kontakter
 
 Shellyn i värmepumpen lyssnar på MQTT-topicet och kopplar de fysiska SG Ready-kontakterna:
 
@@ -120,6 +120,22 @@ boost  → Kontakt 1 = ON,  Kontakt 2 = ON
 normal → Kontakt 1 = OFF, Kontakt 2 = OFF
 block  → Kontakt 1 = ON,  Kontakt 2 = OFF
 ```
+
+## Shelly EM — Produktionsöverstyrning (valfri)
+
+För att aktivera produktionsöverstyrning (solceller) behövs en näteffektsmätare.
+
+**Steg 1:** Ladda in [`shelly-em-script.js`](shelly-em-script.js) på din Shelly EM:
+- Öppna Shelly EM → Scripts → Skapa nytt → klistra in koden
+- Aktivera "Run on startup"
+- Kontrollera att MQTT är aktiverat i Shelly-inställningarna
+
+Scriptet publicerar näteffekten (W) var 10:e sekund till `homeassistant/sgready/grid_power`.
+Positivt = import, negativt = export/solöverskott.
+
+**Steg 2:** Lägg till en MQTT-sensor i HA via [`ha-mqtt-sensor.yaml`](ha-mqtt-sensor.yaml) eller via MQTT-integrationen i gränssnittet.
+
+**Steg 3:** Välj sensorn `sensor.sg_ready_grid_power` som **Elmätare** när du konfigurerar SG Ready-integrationen.
 
 ---
 

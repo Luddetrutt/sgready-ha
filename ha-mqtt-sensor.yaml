@@ -1,0 +1,17 @@
+# HA MQTT-sensor — Näteffekt från Shelly EM
+# Lägg till i configuration.yaml (eller i mqtt: blocket om det redan finns)
+#
+# Alternativt: Skapa via Inställningar → Enheter & Tjänster → MQTT → Konfigurera
+# → Lägg till MQTT-sensor manuellt
+
+mqtt:
+  sensor:
+    - name: "SG Ready Grid Power"
+      unique_id: sgready_grid_power_shelly
+      state_topic: "homeassistant/sgready/grid_power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value | float(0) | round(0) }}"
+      expire_after: 60   # markeras unavailable om ingen uppdatering på 60s
+      icon: mdi:transmission-tower
