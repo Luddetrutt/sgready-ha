@@ -40,17 +40,32 @@ class SGReadyModeSensor(CoordinatorEntity, SensorEntity):
         if not d:
             return {}
         return {
+            # Beslut
             "reason": d.get("reason"),
-            "confidence": d.get("confidence"),
-            "price_percentile": d.get("price_percentile"),
+            "confidence": f"{d.get('confidence', 0)}%",
+            "override": d.get("override", False),
+            "temp_override_active": d.get("temp_override_active"),
+            # Prisanalys
+            "price_percentile": f"{d.get('price_percentile', 0):.0f}%",
+            "price_vs_avg": f"{d.get('price_vs_avg_pct', 0):.0f}%",
+            "diff_from_avg_ore": d.get("diff_from_avg_ore"),
             "price_spread": d.get("price_spread"),
+            "spread_pct": f"{d.get('spread_pct', 0):.0f}%",
+            "insignificant_spread": d.get("insignificant_spread"),
             "boost_threshold": d.get("boost_threshold"),
             "block_threshold": d.get("block_threshold"),
-            "window_size": d.get("window_size"),
-            "has_tomorrow": d.get("has_tomorrow"),
+            # Fönster
+            "window_size": f"{d.get('window_size', 0)}h",
+            "window_avg": d.get("window_avg"),
+            "window_min": d.get("window_min"),
+            "window_max": d.get("window_max"),
+            "has_tomorrow_prices": d.get("has_tomorrow"),
+            # Temperatur
             "indoor_temp": d.get("indoor_temp"),
-            "temp_override_active": d.get("temp_override_active"),
-            "override": d.get("override", False),
+            "min_temp": d.get("min_temp"),
+            # Konfiguration
+            "boost_pct": f"{d.get('boost_pct', 0):.0f}%",
+            "block_pct": f"{d.get('block_pct', 0):.0f}%",
         }
 
 

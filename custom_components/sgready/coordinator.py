@@ -264,24 +264,46 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         elif not has_tomorrow:
             confidence = max(55, confidence - 5)
 
+        window_avg = window_stats["avg"] if window_stats else None
+        window_min = window_stats["min"] if window_stats else None
+        window_max = window_stats["max"] if window_stats else None
+        price_vs_avg = (current_price / window_avg) if window_avg else 1.0
+        diff_from_avg = abs(current_price - window_avg) if window_avg else 0.0
+        spread_percent = (price_spread / window_avg * 100) if window_avg else 0.0
+
         _LOGGER.info(
             "SG Ready: %s | %s | P%.0f | pris=%.2f kr | spread=%.2f kr | conf=%d%%",
             sg_mode.upper(), reason, price_percentile, current_price, price_spread, confidence,
         )
 
         return {
+            # Beslut
             "mode": sg_mode,
             "reason": reason,
             "confidence": confidence,
-            "current_price": current_price,
-            "price_percentile": round(price_percentile, 1),
-            "price_spread": round(price_spread, 4),
-            "boost_threshold": boost_threshold,
-            "block_threshold": block_threshold,
-            "window_size": len(window),
-            "has_tomorrow": has_tomorrow,
             "temp_override_active": temp_override_active,
+            # Priser
+            "current_price": current_price,
             "indoor_temp": indoor_temp,
+            # Analys
+            "price_percentile": round(price_percentile, 1),
+            "price_vs_avg_pct": round(price_vs_avg * 100, 1),
+            "diff_from_avg_ore": round(diff_from_avg * 100, 1),
+            "price_spread": round(price_spread, 3),
+            "spread_pct": round(spread_percent, 1),
+            "insignificant_spread": insignificant_spread,
+            "boost_threshold": round(boost_threshold, 3) if boost_threshold else None,
+            "block_threshold": round(block_threshold, 3) if block_threshold else None,
+            # Fönster
+            "window_size": len(window),
+            "window_avg": round(window_avg, 3) if window_avg else None,
+            "window_min": round(window_min, 3) if window_min else None,
+            "window_max": round(window_max, 3) if window_max else None,
+            "has_tomorrow": has_tomorrow,
+            # Konfiguration
+            "boost_pct": self.boost_pct,
+            "block_pct": self.block_pct,
+            "min_temp": self.min_temp,
         }
 
     def _get_indoor_temp(self) -> float | None:
