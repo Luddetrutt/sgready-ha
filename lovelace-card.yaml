@@ -1,15 +1,5 @@
-# SG Ready Styrning — Lovelace-kort
-# Klistra in via Dashboard → Redigera → Lägg till kort → Manuell
-#
-# Kräver card-mod (HACS) för knapp-highlighting.
-# Entity-ID:n kan skilja sig något beroende på din HA-installation.
-# Kolla rätt ID under: Inställningar → Enheter & Tjänster → SG Ready → Entiteter
-
 type: vertical-stack
 cards:
-
-  # ── Lägesknapppar ─────────────────────────────────────────────────────────
-  # Tryck för att tvinga ett läge. Håll inne Normal för att återgå till auto.
   - type: horizontal-stack
     cards:
       - show_name: true
@@ -42,7 +32,6 @@ cards:
               box-shadow: 0 0 10px var(--warning-color) !important;
               {% endif %}
             }
-
       - show_name: true
         show_icon: true
         type: button
@@ -67,7 +56,6 @@ cards:
               box-shadow: 0 0 10px var(--warning-color) !important;
               {% endif %}
             }
-
       - show_name: true
         show_icon: true
         type: button
@@ -92,7 +80,6 @@ cards:
               box-shadow: 0 0 10px var(--warning-color) !important;
               {% endif %}
             }
-
       - show_name: true
         show_icon: true
         type: button
@@ -113,7 +100,6 @@ cards:
               {% endif %}
             }
 
-  # ── Statusrad ──────────────────────────────────────────────────────────────
   - type: horizontal-stack
     cards:
       - type: entity
@@ -130,45 +116,42 @@ cards:
         name: Rankning
         icon: mdi:sort-numeric-ascending
 
-  # ── Orsak & AI-status ──────────────────────────────────────────────────────
   - type: markdown
     content: |
       {% set d = state_attr('sensor.sg_ready_lage', 'reason') %}
       {% set ai = states('select.sg_ready_ai_override') %}
-      **Orsak:** {{ d or '-' }}
+      Orsak: {{ d or '-' }}
       {% if ai != 'auto' %}
-      **Manuellt lage aktivt** - hall inne Normal for att atergå till auto
+      Manuellt lage aktivt - hall inne Normal for att atergå till auto
       {% endif %}
 
-  # ── Prisalgoritm-sliders ───────────────────────────────────────────────────
   - type: entities
     title: Prisalgoritm
     icon: mdi:chart-bell-curve
     entities:
       - entity: number.sg_ready_boost_procent
-        name: Boost — billigaste timmar
+        name: "Boost \u2014 billigaste timmar"
         icon: mdi:arrow-up-bold-circle
       - entity: number.sg_ready_block_procent
-        name: Block — dyraste timmar
+        name: "Block \u2014 dyraste timmar"
         icon: mdi:arrow-down-bold-circle
       - entity: number.sg_ready_mintemperatur
         name: Mintemperatur (block-skydd)
         icon: mdi:thermometer-low
 
-  # ── Produktionsöverstyrning ────────────────────────────────────────────────
   - type: entities
-    title: Produktionsöverstyrning (solceller)
+    title: "Produktionsöverstyrning (solceller)"
     icon: mdi:solar-power
     show_header_toggle: false
     entities:
       - entity: number.sg_ready_produktion_normal_troskel
-        name: Normal-tröskel (W)
+        name: "Normal-tröskel (W)"
         icon: mdi:solar-power
       - entity: number.sg_ready_produktion_boost_troskel
-        name: Boost-tröskel (W)
+        name: "Boost-tröskel (W)"
         icon: mdi:solar-power-variant
-      - entity: number.sg_ready_produktion_atergangstroskel
-        name: Återgångs-tröskel (W)
+      - entity: number.sg_ready_produktion_atergangs_troskel
+        name: "Återgångs-tröskel (W)"
         icon: mdi:transmission-tower-import
       - entity: number.sg_ready_produktion_hysteres
         name: Hysteres (W)
@@ -176,6 +159,6 @@ cards:
       - entity: number.sg_ready_produktion_aktiveringstid
         name: Aktiveringstid (s)
         icon: mdi:timer-sand
-      - entity: number.sg_ready_produktion_avstaengningstid
+      - entity: number.sg_ready_produktion_avstangningstid
         name: Avstängningstid (s)
         icon: mdi:timer-off
