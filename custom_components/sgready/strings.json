@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Konfigurera SG Ready Styrning",
+        "description": "Välj din Nord Pool-integration och ange övriga inställningar.",
+        "data": {
+          "nordpool_config_entry": "Nord Pool-integration",
+          "nordpool_area": "Elområde",
+          "mqtt_topic": "MQTT-topic (styrkommando)",
+          "mqtt_ai_topic": "MQTT-topic (AI-override)",
+          "temp_entity": "Inomhustermometer (valfri)",
+          "grid_power_entity": "Elmätare / nettomätare (valfri, för produktionsöverstyrning)",
+          "tariff_entity": "Tariff-sensor (valfri)",
+          "prod_enabled": "Aktivera produktionsöverstyrning"
+        }
+      }
+    },
+    "abort": {
+      "nordpool_not_found": "Nord Pool-integrationen hittades inte. Installera Nord Pool via HACS och konfigurera den innan du lägger till SG Ready.",
+      "already_configured": "SG Ready Styrning är redan konfigurerad."
+    },
+    "error": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Alternativ — SG Ready Styrning",
+        "data": {
+          "boost_pct": "Boost-procent (% billigaste timmar)",
+          "block_pct": "Block-procent (% dyraste timmar)",
+          "min_temp": "Mintemperatur för block-skydd (°C)",
+          "mqtt_topic": "MQTT-topic (styrkommando)",
+          "mqtt_ai_topic": "MQTT-topic (AI-override)"
+        }
+      }
+    }
+  }
+}
