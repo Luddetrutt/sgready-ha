@@ -38,6 +38,25 @@ CONF_BOOST_PCT = "boost_pct"
 CONF_BLOCK_PCT = "block_pct"
 CONF_MIN_TEMP = "min_temp"
 
+# Production override config-nycklar
+CONF_GRID_POWER_ENTITY = "grid_power_entity"
+CONF_TARIFF_ENTITY = "tariff_entity"
+CONF_PROD_ENABLED = "prod_override_enabled"
+CONF_PROD_NORMAL_THRESHOLD = "prod_normal_threshold"   # W, negativt = export
+CONF_PROD_BOOST_THRESHOLD = "prod_boost_threshold"     # W, negativt = export
+CONF_PROD_RETURN_THRESHOLD = "prod_return_threshold"   # W, positivt = import
+CONF_PROD_HYSTERESIS = "prod_hysteresis"               # W
+CONF_PROD_MIN_DURATION = "prod_min_duration"           # sekunder
+CONF_PROD_OFF_DELAY = "prod_off_delay"                 # sekunder
+
+# Standardvärden production override
+DEFAULT_PROD_NORMAL_THRESHOLD = -100
+DEFAULT_PROD_BOOST_THRESHOLD = -500
+DEFAULT_PROD_RETURN_THRESHOLD = 50
+DEFAULT_PROD_HYSTERESIS = 50
+DEFAULT_PROD_MIN_DURATION = 300
+DEFAULT_PROD_OFF_DELAY = 600
+
 # Entitets-ID:n
 SENSOR_MODE = "mode"
 SENSOR_PRICE = "current_price"

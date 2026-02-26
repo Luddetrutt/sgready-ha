@@ -64,6 +64,20 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         self._ai_reason: str = ""
         self._mqtt_unsub = None
 
+        # Production override state machine
+        self._prod_state = {
+            "active": False,
+            "mode": None,
+            "start_time": None,       # Tidpunkt för att börja räkna aktiveringstid
+            "last_change": None,      # Tidpunkt för in i hysteres-zon
+            "in_hysteresis": False,
+            "tariff_limited": False,
+        }
+
+        # Grid meter
+        self._grid_power: float = 0.0
+        self._grid_timestamp: datetime | None = None
+
         # Konfiguration (uppdateras från number-entiteter)
         self.boost_pct: float = entry.data.get(CONF_BOOST_PCT, DEFAULT_BOOST_PCT)
         self.block_pct: float = entry.data.get(CONF_BLOCK_PCT, DEFAULT_BLOCK_PCT)
@@ -298,9 +312,16 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             reason = f"Normalläge P{price_percentile:.0f}"
             confidence = 75
 
-        # SIST: Temperaturskydd (förhindrar bara block, ej AI-override)
+        # POST-1: Production override (ersätter bara block, ej vid AI-override)
+        prod_override_active = False
+        if not ai_override_active:
+            sg_mode, reason, prod_override_active = self._check_production_override(sg_mode, reason)
+            if prod_override_active:
+                confidence = 95
+
+        # POST-2: Temperaturskydd (förhindrar bara block, ej vid AI/prod-override)
         indoor_temp = self._get_indoor_temp()
-        if not ai_override_active and indoor_temp is not None and indoor_temp < self.min_temp and sg_mode == MODE_BLOCK:
+        if not ai_override_active and not prod_override_active and indoor_temp is not None and indoor_temp < self.min_temp and sg_mode == MODE_BLOCK:
             sg_mode = MODE_NORMAL
             reason = f"🌡 Temp för låg ({indoor_temp:.1f}°C < {self.min_temp}°C) — förhindrar block"
             confidence = 95
@@ -335,6 +356,8 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             "has_tomorrow": has_tomorrow,
             "indoor_temp": indoor_temp,
             "temp_override_active": temp_override_active,
+            "prod_override_active": prod_override_active,
+            "prod_override_state": self._prod_state.get("mode"),
             "ai_override_active": ai_override_active,
             "ai_mode": effective_ai_mode,
             "ai_reason": self._ai_reason,
@@ -344,6 +367,141 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             "block_pct": self.block_pct,
             "min_temp": self.min_temp,
         }
+
+    def _check_production_override(
+        self, original_mode: str, original_reason: str
+    ) -> tuple[str, str, bool]:
+        """Production override — ersätter BARA 'block' vid eget överskott.
+        
+        Returnerar (new_mode, reason, override_active).
+        Portat direkt från Node-RED 'Production Override Logic (med hysteres)'.
+        """
+        from .const import (
+            CONF_GRID_POWER_ENTITY, CONF_TARIFF_ENTITY, CONF_PROD_ENABLED,
+            CONF_PROD_NORMAL_THRESHOLD, CONF_PROD_BOOST_THRESHOLD,
+            CONF_PROD_RETURN_THRESHOLD, CONF_PROD_HYSTERESIS,
+            CONF_PROD_MIN_DURATION, CONF_PROD_OFF_DELAY,
+            DEFAULT_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD,
+            DEFAULT_PROD_RETURN_THRESHOLD, DEFAULT_PROD_HYSTERESIS,
+            DEFAULT_PROD_MIN_DURATION, DEFAULT_PROD_OFF_DELAY,
+        )
+
+        # Enabled?
+        if not self.entry.data.get(CONF_PROD_ENABLED, True):
+            return original_mode, original_reason, False
+
+        # Hämta config
+        normal_threshold = self.entry.data.get(CONF_PROD_NORMAL_THRESHOLD, DEFAULT_PROD_NORMAL_THRESHOLD)
+        boost_threshold = self.entry.data.get(CONF_PROD_BOOST_THRESHOLD, DEFAULT_PROD_BOOST_THRESHOLD)
+        return_threshold = self.entry.data.get(CONF_PROD_RETURN_THRESHOLD, DEFAULT_PROD_RETURN_THRESHOLD)
+        hysteresis = self.entry.data.get(CONF_PROD_HYSTERESIS, DEFAULT_PROD_HYSTERESIS)
+        min_duration = self.entry.data.get(CONF_PROD_MIN_DURATION, DEFAULT_PROD_MIN_DURATION)
+        off_delay = self.entry.data.get(CONF_PROD_OFF_DELAY, DEFAULT_PROD_OFF_DELAY)
+
+        # Hämta mätardata
+        grid_entity = self.entry.data.get(CONF_GRID_POWER_ENTITY)
+        if not grid_entity:
+            return original_mode, original_reason, False
+
+        grid_state = self.hass.states.get(grid_entity)
+        if not grid_state or grid_state.state in ("unknown", "unavailable"):
+            return original_mode, original_reason, False
+
+        try:
+            meter_power = float(grid_state.state)
+        except ValueError:
+            return original_mode, original_reason, False
+
+        # Kontrollera att mätardata är färsk (max 5 min)
+        from homeassistant.util.dt import utcnow
+        last_updated = grid_state.last_updated
+        if (utcnow() - last_updated).total_seconds() > 300:
+            _LOGGER.warning("Gammal mätardata — production override inaktiv")
+            return original_mode, original_reason, False
+
+        # Tariff-status
+        in_tariff_period = False
+        tariff_entity = self.entry.data.get(CONF_TARIFF_ENTITY)
+        if tariff_entity:
+            t_state = self.hass.states.get(tariff_entity)
+            if t_state:
+                in_tariff_period = t_state.state in ("on", "true", "1", "active")
+
+        # Hysteres-tröskel vid återgång
+        s = self._prod_state
+        deactivation_threshold = return_threshold + (hysteresis if s["active"] else 0)
+        now = datetime.now()
+        surplus = abs(meter_power)
+
+        if meter_power < normal_threshold:
+            # Tillräckligt överskott
+            if not s["active"]:
+                if s["start_time"] is None:
+                    s["start_time"] = now
+                duration = (now - s["start_time"]).total_seconds()
+                if duration >= min_duration:
+                    s["active"] = True
+                    s["last_change"] = now
+                    s["in_hysteresis"] = False
+                    # Välj läge
+                    if surplus >= abs(boost_threshold) and (not in_tariff_period or meter_power < 0):
+                        s["mode"] = MODE_BOOST
+                        s["tariff_limited"] = False
+                    elif surplus >= abs(boost_threshold):
+                        s["mode"] = MODE_NORMAL
+                        s["tariff_limited"] = True
+                    else:
+                        s["mode"] = MODE_NORMAL
+                        s["tariff_limited"] = False
+                    _LOGGER.info("Production override aktiverad: %s vid %dW", s["mode"], surplus)
+            else:
+                # Aktiv — uppdatera läge dynamiskt
+                s["in_hysteresis"] = False
+                s["last_change"] = now
+                if surplus >= abs(boost_threshold):
+                    if not in_tariff_period or meter_power < 0:
+                        if s["mode"] != MODE_BOOST:
+                            s["mode"] = MODE_BOOST
+                            s["tariff_limited"] = False
+                    elif s["mode"] == MODE_BOOST:
+                        s["mode"] = MODE_NORMAL
+                        s["tariff_limited"] = True
+                elif surplus >= abs(normal_threshold):
+                    if s["mode"] != MODE_NORMAL:
+                        s["mode"] = MODE_NORMAL
+                        s["tariff_limited"] = False
+
+        elif meter_power > deactivation_threshold:
+            # Över återgångströskel
+            s["start_time"] = None
+            if s["active"]:
+                if not s["in_hysteresis"]:
+                    s["in_hysteresis"] = True
+                    s["last_change"] = now
+                time_since = (now - s["last_change"]).total_seconds()
+                if time_since >= off_delay:
+                    s["active"] = False
+                    s["mode"] = None
+                    s["in_hysteresis"] = False
+                    s["tariff_limited"] = False
+                    _LOGGER.info("Production override inaktiverad efter %ds", off_delay)
+        else:
+            # Hysteres-zon
+            if not s["active"]:
+                s["start_time"] = None
+
+        # Applicera — ENDAST om original_mode är "block"
+        if s["active"] and s["mode"] and original_mode == MODE_BLOCK:
+            power_str = f"{surplus:.0f}W överskott" if meter_power < 0 else f"{meter_power:.0f}W import"
+            tariff_str = " (tariff-begränsad)" if s["tariff_limited"] else ""
+            reason = f"🔋 Egen produktion: {power_str} → {s['mode']}{tariff_str}"
+            return s["mode"], reason, True
+        elif s["active"] and s["mode"] and original_mode != MODE_BLOCK:
+            # Ursprungligt läge är inte block — låt vara
+            s["active"] = False
+            s["mode"] = None
+
+        return original_mode, original_reason, False
 
     def _get_indoor_temp(self) -> float | None:
         temp_entity = self.entry.data.get(CONF_TEMP_ENTITY)
