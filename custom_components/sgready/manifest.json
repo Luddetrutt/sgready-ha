@@ -1,0 +1,12 @@
+{
+  "domain": "sgready",
+  "name": "SG Ready Styrning",
+  "version": "1.0.0",
+  "documentation": "https://github.com/Luddetrutt/sgready-ha",
+  "issue_tracker": "https://github.com/Luddetrutt/sgready-ha/issues",
+  "dependencies": ["mqtt"],
+  "codeowners": ["@Luddetrutt"],
+  "requirements": [],
+  "iot_class": "local_push",
+  "config_flow": true
+}
