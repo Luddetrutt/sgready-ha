@@ -1,12 +1,117 @@
 # SG Ready Styrning — Lovelace-kort
 # Klistra in via Dashboard → Redigera → Lägg till kort → Manuell
 #
-# OBS: Om ett kort inte dyker upp, kolla entity-ID:na under:
-# Inställningar → Enheter & Tjänster → SG Ready → Entiteter
-# Svenska tecken (ä/ö/å) kan ge något annorlunda ID i din HA-installation.
+# Kräver card-mod (HACS) för knapp-highlighting.
+# Entity-ID:n kan skilja sig något beroende på din HA-installation.
+# Kolla rätt ID under: Inställningar → Enheter & Tjänster → SG Ready → Entiteter
 
 type: vertical-stack
 cards:
+
+  # ── Lägesknapppar ─────────────────────────────────────────────────────────
+  # Tryck för att tvinga ett läge. Håll inne Normal för att återgå till auto.
+  - type: horizontal-stack
+    cards:
+      - show_name: true
+        show_icon: true
+        type: button
+        name: Normal
+        icon: mdi:home
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data:
+            entity_id: select.sg_ready_ai_override
+            option: force_normal
+        hold_action:
+          action: call-service
+          service: select.select_option
+          service_data:
+            entity_id: select.sg_ready_ai_override
+            option: auto
+        card_mod:
+          style: |
+            ha-card {
+              {% set mode = states('sensor.sg_ready_lage') %}
+              {% set ai = states('select.sg_ready_ai_override') %}
+              {% if ai == 'auto' and mode == 'normal' %}
+              border: 3px solid var(--primary-color) !important;
+              box-shadow: 0 0 10px var(--primary-color) !important;
+              {% elif ai == 'force_normal' %}
+              border: 3px solid var(--warning-color) !important;
+              box-shadow: 0 0 10px var(--warning-color) !important;
+              {% endif %}
+            }
+
+      - show_name: true
+        show_icon: true
+        type: button
+        name: Boost
+        icon: mdi:lightning-bolt
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data:
+            entity_id: select.sg_ready_ai_override
+            option: force_boost
+        card_mod:
+          style: |
+            ha-card {
+              {% set mode = states('sensor.sg_ready_lage') %}
+              {% set ai = states('select.sg_ready_ai_override') %}
+              {% if ai == 'auto' and mode == 'boost' %}
+              border: 3px solid var(--success-color) !important;
+              box-shadow: 0 0 10px var(--success-color) !important;
+              {% elif ai == 'force_boost' %}
+              border: 3px solid var(--warning-color) !important;
+              box-shadow: 0 0 10px var(--warning-color) !important;
+              {% endif %}
+            }
+
+      - show_name: true
+        show_icon: true
+        type: button
+        name: Block
+        icon: mdi:block-helper
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data:
+            entity_id: select.sg_ready_ai_override
+            option: force_block
+        card_mod:
+          style: |
+            ha-card {
+              {% set mode = states('sensor.sg_ready_lage') %}
+              {% set ai = states('select.sg_ready_ai_override') %}
+              {% if ai == 'auto' and mode == 'block' %}
+              border: 3px solid var(--error-color) !important;
+              box-shadow: 0 0 10px var(--error-color) !important;
+              {% elif ai == 'force_block' %}
+              border: 3px solid var(--warning-color) !important;
+              box-shadow: 0 0 10px var(--warning-color) !important;
+              {% endif %}
+            }
+
+      - show_name: true
+        show_icon: true
+        type: button
+        name: Auto
+        icon: mdi:robot-outline
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data:
+            entity_id: select.sg_ready_ai_override
+            option: auto
+        card_mod:
+          style: |
+            ha-card {
+              {% if states('select.sg_ready_ai_override') == 'auto' %}
+              border: 3px solid var(--primary-color) !important;
+              box-shadow: 0 0 10px var(--primary-color) !important;
+              {% endif %}
+            }
 
   # ── Statusrad ──────────────────────────────────────────────────────────────
   - type: horizontal-stack
@@ -25,18 +130,16 @@ cards:
         name: Rankning
         icon: mdi:sort-numeric-ascending
 
-  # ── Manuella overrides ────────────────────────────────────────────────────
-  - type: horizontal-stack
-    cards:
-      - type: tile
-        entity: switch.sg_ready_boost_override
-        name: Manuell Boost
-        icon: mdi:lightning-bolt
-        color: orange
-      - type: tile
-        entity: select.sg_ready_ai_override
-        name: AI Override
-        icon: mdi:robot
+  # ── Orsak & AI-status ──────────────────────────────────────────────────────
+  - type: markdown
+    content: >
+      {% set d = state_attr('sensor.sg_ready_lage', 'reason') %}
+      {% set ai = states('select.sg_ready_ai_override') %}
+      {% set ai_reason = state_attr('sensor.sg_ready_lage', 'ai_reason') %}
+      **Orsak:** {{ d or '–' }}
+      {% if ai != 'auto' %}
+      ⚠️ **Manuellt läge aktivt** — håll inne Normal-knappen för att återgå till auto
+      {% endif %}
 
   # ── Prisalgoritm-sliders ───────────────────────────────────────────────────
   - type: entities
