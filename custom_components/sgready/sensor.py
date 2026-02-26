@@ -36,12 +36,21 @@ class SGReadyModeSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        if not self.coordinator.data:
+        d = self.coordinator.data
+        if not d:
             return {}
         return {
-            "override": self.coordinator.data.get("override", False),
-            "rank": self.coordinator.data.get("rank"),
-            "total_hours": self.coordinator.data.get("total"),
+            "reason": d.get("reason"),
+            "confidence": d.get("confidence"),
+            "price_percentile": d.get("price_percentile"),
+            "price_spread": d.get("price_spread"),
+            "boost_threshold": d.get("boost_threshold"),
+            "block_threshold": d.get("block_threshold"),
+            "window_size": d.get("window_size"),
+            "has_tomorrow": d.get("has_tomorrow"),
+            "indoor_temp": d.get("indoor_temp"),
+            "temp_override_active": d.get("temp_override_active"),
+            "override": d.get("override", False),
         }
 
 
