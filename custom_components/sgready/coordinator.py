@@ -182,42 +182,65 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             self._mqtt_unsub()
             self._mqtt_unsub = None
 
-    # ── Prisfetching via Nord Pool-action ───────────────────────────────────
+    # ── Prisfetching via Nord Pool coordinator ──────────────────────────────
 
-    async def _fetch_prices(self, date_str: str) -> list[float]:
-        """Hämta timpriser via nordpool.get_prices_for_date."""
+    async def _fetch_prices(self) -> tuple[list[float], list[float]]:
+        """Hämta timpriser direkt från Nord Pool-koordinatorns data.
+
+        Nord Pool-integrationen (officiell, HA 2024+) lagrar priser i
+        config_entry.runtime_data. Rådata är i milli-SEK/MWh — delas
+        med 1000 för att få SEK/kWh.
+        """
+        from homeassistant.util import dt as dt_util
+
+        nordpool_entry_id = _conf(self.entry, CONF_NORDPOOL_CONFIG_ENTRY)
+        area = _conf(self.entry, CONF_NORDPOOL_AREA, "SE4")
+
+        nordpool_entry = self.hass.config_entries.async_get_entry(nordpool_entry_id)
+        if not nordpool_entry:
+            _LOGGER.warning("Nord Pool config entry '%s' hittades inte", nordpool_entry_id)
+            return [], []
+
+        coordinator = getattr(nordpool_entry, "runtime_data", None)
+        if not coordinator or not getattr(coordinator, "data", None):
+            _LOGGER.warning("Nord Pool coordinator har ingen data ännu")
+            return [], []
+
+        today_str = dt_util.now().strftime("%Y-%m-%d")
+        tomorrow_str = (dt_util.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        today_prices: list[float] = []
+        tomorrow_prices: list[float] = []
+
         try:
-            response = await self.hass.services.async_call(
-                "nordpool",
-                "get_prices_for_date",
-                {
-                    "date": date_str,
-                    "areas": _conf(self.entry, CONF_NORDPOOL_AREA, "SE4"),
-                    "currency": "SEK",
-                    "config_entry": _conf(self.entry, CONF_NORDPOOL_CONFIG_ENTRY),
-                },
-                blocking=True,
-                return_response=True,
-            )
-            # Svarsformatet: lista med timpris eller dict med areas
-            if isinstance(response, list):
-                return [float(p) for p in response if p is not None]
-            if isinstance(response, dict):
-                area = _conf(self.entry, CONF_NORDPOOL_AREA, "SE4")
-                prices = response.get(area, response.get("prices", []))
-                return [float(p) for p in prices if p is not None]
+            for day_data in coordinator.data.entries:
+                prices = [
+                    entry.entry[area] / 1000  # milli-SEK/MWh → SEK/kWh
+                    for entry in day_data.entries
+                    if entry.entry.get(area) is not None
+                ]
+                if day_data.requested_date == today_str:
+                    today_prices = prices
+                elif day_data.requested_date == tomorrow_str:
+                    tomorrow_prices = prices
         except Exception as err:
-            _LOGGER.warning("Kunde inte hämta priser för %s: %s", date_str, err)
-        return []
+            _LOGGER.error("Fel vid parsning av Nord Pool-data: %s", err, exc_info=True)
+            return [], []
+
+        if not today_prices:
+            _LOGGER.warning("Inga priser hittade för %s, area=%s", today_str, area)
+        else:
+            _LOGGER.debug(
+                "Nord Pool: %d timmar idag, %d imorgon (area=%s)",
+                len(today_prices), len(tomorrow_prices), area,
+            )
+
+        return today_prices, tomorrow_prices
 
     # ── Huvuduppdatering ────────────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict:
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-
-        today = await self._fetch_prices(today_str)
-        tomorrow = await self._fetch_prices(tomorrow_str)
+        today, tomorrow = await self._fetch_prices()
 
         try:
             result = self._calculate_mode(today, tomorrow)
