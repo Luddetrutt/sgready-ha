@@ -26,12 +26,12 @@ class SGReadyOverrideSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        return self._coordinator.override
+        return self._coordinator.manual_override
 
     async def async_turn_on(self, **kwargs) -> None:
-        self._coordinator.override = True
+        self._coordinator.manual_override = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        self._coordinator.override = False
+        self._coordinator.manual_override = False
         self.async_write_ha_state()
