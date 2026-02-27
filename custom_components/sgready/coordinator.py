@@ -248,16 +248,28 @@ class SGReadyCoordinator(DataUpdateCoordinator):
         tomorrow_prices: list[float] = []
 
         try:
+            today_start = dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            tomorrow_start = today_start + timedelta(days=1)
+            day_after_start = tomorrow_start + timedelta(days=1)
+
+            today_entries: list[tuple[int, float]] = []
+            tomorrow_entries: list[tuple[int, float]] = []
+
             for day_data in coordinator.data.entries:
-                prices = [
-                    entry.entry[area] / 1000  # milli-SEK/MWh → SEK/kWh
-                    for entry in day_data.entries
-                    if entry.entry.get(area) is not None
-                ]
-                if day_data.requested_date == today_str:
-                    today_prices = prices
-                elif day_data.requested_date == tomorrow_str:
-                    tomorrow_prices = prices
+                for entry in day_data.entries:
+                    price = entry.entry.get(area)
+                    if price is None:
+                        continue
+                    entry_local = dt_util.as_local(entry.start)
+                    if today_start <= entry_local < tomorrow_start:
+                        today_entries.append((entry_local.hour, price / 1000))
+                    elif tomorrow_start <= entry_local < day_after_start:
+                        tomorrow_entries.append((entry_local.hour, price / 1000))
+
+            # Sortera kronologiskt (timme 0 → index 0)
+            today_prices = [p for _, p in sorted(today_entries)]
+            tomorrow_prices = [p for _, p in sorted(tomorrow_entries)]
+
         except Exception as err:
             _LOGGER.error("Fel vid parsning av Nord Pool-data: %s", err, exc_info=True)
             return [], []
