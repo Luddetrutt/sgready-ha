@@ -22,7 +22,7 @@ cards:
         card_mod:
           style: |
             ha-card {
-              {% set mode = states('sensor.sg_ready_lage') %}
+              {% set mode = states('sensor.sg_ready_lage_2') %}
               {% set ai = states('select.sg_ready_ai_override') %}
               {% if ai == 'auto' and mode == 'normal' %}
               border: 3px solid var(--primary-color) !important;
@@ -46,7 +46,7 @@ cards:
         card_mod:
           style: |
             ha-card {
-              {% set mode = states('sensor.sg_ready_lage') %}
+              {% set mode = states('sensor.sg_ready_lage_2') %}
               {% set ai = states('select.sg_ready_ai_override') %}
               {% if ai == 'auto' and mode == 'boost' %}
               border: 3px solid var(--success-color) !important;
@@ -70,7 +70,7 @@ cards:
         card_mod:
           style: |
             ha-card {
-              {% set mode = states('sensor.sg_ready_lage') %}
+              {% set mode = states('sensor.sg_ready_lage_2') %}
               {% set ai = states('select.sg_ready_ai_override') %}
               {% if ai == 'auto' and mode == 'block' %}
               border: 3px solid var(--error-color) !important;
@@ -103,7 +103,7 @@ cards:
   - type: horizontal-stack
     cards:
       - type: entity
-        entity: sensor.sg_ready_lage
+        entity: sensor.sg_ready_lage_2
         name: Läge
         icon: mdi:heat-pump
         state_color: true
@@ -118,7 +118,7 @@ cards:
 
   - type: markdown
     content: |
-      {% set d = state_attr('sensor.sg_ready_lage', 'reason') %}
+      {% set d = state_attr('sensor.sg_ready_lage_2', 'reason') %}
       {% set ai = states('select.sg_ready_ai_override') %}
       Orsak: {{ d or '-' }}
       {% if ai != 'auto' %}
