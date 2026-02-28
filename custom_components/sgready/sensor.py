@@ -103,6 +103,5 @@ class SGReadyRankSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         if not self.coordinator.data:
             return None
-        rank = self.coordinator.data.get("rank")
-        total = self.coordinator.data.get("total")
-        return f"P{rank}/{total}" if rank and total else None
+        percentile = self.coordinator.data.get("price_percentile")
+        return f"P{percentile:.0f}" if percentile is not None else None
