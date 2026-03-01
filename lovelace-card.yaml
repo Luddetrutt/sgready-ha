@@ -43,6 +43,8 @@ cards:
           service_data:
             entity_id: select.sg_ready_ai_override
             option: force_boost
+        hold_action:
+          action: none
         card_mod:
           style: |
             ha-card {
@@ -67,6 +69,8 @@ cards:
           service_data:
             entity_id: select.sg_ready_ai_override
             option: force_block
+        hold_action:
+          action: none
         card_mod:
           style: |
             ha-card {
@@ -91,6 +95,8 @@ cards:
           service_data:
             entity_id: select.sg_ready_ai_override
             option: auto
+        hold_action:
+          action: none
         card_mod:
           style: |
             ha-card {

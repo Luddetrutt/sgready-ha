@@ -395,17 +395,17 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             confidence = 100
         elif effective_ai_mode == AI_MODE_FORCE_BOOST:
             sg_mode = MODE_BOOST
-            reason = f"🤖 AI: {self._ai_reason or 'Force boost'}"
+            reason = f"🤖 AI: {self._ai_reason}" if self._ai_reason else "⚡ Manuell överstyrning: boost"
             confidence = 100
             ai_override_active = True
         elif effective_ai_mode == AI_MODE_FORCE_NORMAL:
             sg_mode = MODE_NORMAL
-            reason = f"🤖 AI: {self._ai_reason or 'Force normal'}"
+            reason = f"🤖 AI: {self._ai_reason}" if self._ai_reason else "🏠 Manuell överstyrning: normal"
             confidence = 100
             ai_override_active = True
         elif effective_ai_mode == AI_MODE_FORCE_BLOCK:
             sg_mode = MODE_BLOCK
-            reason = f"🤖 AI: {self._ai_reason or 'Force block'}"
+            reason = f"🤖 AI: {self._ai_reason}" if self._ai_reason else "🔒 Manuell överstyrning: block"
             confidence = 100
             ai_override_active = True
 
