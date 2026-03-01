@@ -252,8 +252,8 @@ class SGReadyCoordinator(DataUpdateCoordinator):
             tomorrow_start = today_start + timedelta(days=1)
             day_after_start = tomorrow_start + timedelta(days=1)
 
-            today_entries: list[tuple[int, float]] = []
-            tomorrow_entries: list[tuple[int, float]] = []
+            today_dict: dict[int, float] = {}
+            tomorrow_dict: dict[int, float] = {}
 
             for day_data in coordinator.data.entries:
                 for entry in day_data.entries:
@@ -262,13 +262,14 @@ class SGReadyCoordinator(DataUpdateCoordinator):
                         continue
                     entry_local = dt_util.as_local(entry.start)
                     if today_start <= entry_local < tomorrow_start:
-                        today_entries.append((entry_local.hour, price / 1000))
+                        # Dict deduplicerar — senaste värdet vinner vid ev. dubbletter
+                        today_dict[entry_local.hour] = price / 1000
                     elif tomorrow_start <= entry_local < day_after_start:
-                        tomorrow_entries.append((entry_local.hour, price / 1000))
+                        tomorrow_dict[entry_local.hour] = price / 1000
 
-            # Sortera kronologiskt (timme 0 → index 0)
-            today_prices = [p for _, p in sorted(today_entries)]
-            tomorrow_prices = [p for _, p in sorted(tomorrow_entries)]
+            # Sortera kronologiskt (timme 0 → index 0), max 24 element per dag
+            today_prices = [today_dict[h] for h in sorted(today_dict)]
+            tomorrow_prices = [tomorrow_dict[h] for h in sorted(tomorrow_dict)]
 
         except Exception as err:
             _LOGGER.error("Fel vid parsning av Nord Pool-data: %s", err, exc_info=True)
